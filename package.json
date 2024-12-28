@@ -1,6 +1,7 @@
 {
-  "name": "welcome-bot",
+  "name": "discord-bot",
   "version": "1.0.0",
+  "description": "A Discord bot with auto welcome and custom replies",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -8,6 +9,6 @@
   "dependencies": {
     "discord.js": "^14.11.0",
     "mongoose": "^7.5.0",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.3.1"
   }
 }
