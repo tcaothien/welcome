@@ -1,99 +1,97 @@
-const { Client, Intents, Permissions } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
 // Kết nối MongoDB
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log('Kết nối MongoDB thành công!'))
-  .catch(err => console.log(err));
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error(err));
 
-// Mô hình lưu cấu hình chào mừng và phản hồi
-const ConfigSchema = new mongoose.Schema({
+// Mô hình lưu trữ dữ liệu
+const schema = new mongoose.Schema({
   guildId: String,
-  welcomeChannelId: String,
+  welcomeChannel: String,
   welcomeMessage: String,
-  autoReplies: [{ trigger: String, response: String }],
+  replies: [{ trigger: String, response: String }],
+  autoWelcome: { type: Boolean, default: true }
 });
-const Config = mongoose.model('Config', ConfigSchema);
+const Guild = mongoose.model('Guild', schema);
 
-// Khởi tạo bot
-const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES, Intents.FLAGS.GUILD_MEMBERS] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
-client.once('ready', () => {
-  console.log(`Bot đã hoạt động: ${client.user.tag}`);
+client.on('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
 });
 
-// Khi người mới vào server
 client.on('guildMemberAdd', async member => {
-  const config = await Config.findOne({ guildId: member.guild.id });
-  if (config && config.welcomeChannelId && config.welcomeMessage) {
-    const channel = member.guild.channels.cache.get(config.welcomeChannelId);
-    if (channel) channel.send(config.welcomeMessage.replace('{user}', member));
+  const guildData = await Guild.findOne({ guildId: member.guild.id });
+  if (!guildData || !guildData.autoWelcome) return;
+
+  const channel = member.guild.channels.cache.get(guildData.welcomeChannel);
+  if (channel) {
+    channel.send(guildData.welcomeMessage.replace('{user}', `<@${member.id}>`));
   }
 });
 
-// Lệnh quản lý bot
 client.on('messageCreate', async message => {
   if (!message.guild || message.author.bot) return;
 
-  const isAdmin = message.member.permissions.has(Permissions.FLAGS.ADMINISTRATOR);
-  if (!isAdmin) return;
+  const guildData = await Guild.findOne({ guildId: message.guild.id });
 
-  const args = message.content.split(' ').slice(1);
-  const config = await Config.findOne({ guildId: message.guild.id }) || new Config({ guildId: message.guild.id });
+  // Quản lý lệnh
+  if (message.content.startsWith('eonwlc')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    if (!guildData) await Guild.create({ guildId: message.guild.id, welcomeChannel: '1287289344003936266', welcomeMessage: 'Chào mừng {user} đến với server!' });
+    else guildData.autoWelcome = true, await guildData.save();
+    message.reply('Tính năng chào mừng đã được bật.');
+  }
 
-  switch (message.content.split(' ')[0]) {
-    case 'eonwlc':
-      config.welcomeChannelId = '1287289344003936266';
-      await config.save();
-      message.channel.send('Đã bật chào mừng!');
-      break;
+  if (message.content.startsWith('eoffwlc')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    if (guildData) guildData.autoWelcome = false, await guildData.save();
+    message.reply('Tính năng chào mừng đã được tắt.');
+  }
 
-    case 'eoffwlc':
-      config.welcomeChannelId = null;
-      await config.save();
-      message.channel.send('Đã tắt chào mừng!');
-      break;
+  if (message.content.startsWith('esetwlc')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    const newMessage = message.content.split(' ').slice(1).join(' ');
+    if (!newMessage) return message.reply('Vui lòng nhập câu chào mới.');
+    if (!guildData) await Guild.create({ guildId: message.guild.id, welcomeMessage: newMessage });
+    else guildData.welcomeMessage = newMessage, await guildData.save();
+    message.reply('Câu chào mới đã được cập nhật.');
+  }
 
-    case 'esetwlc':
-      const welcomeMessage = args.join(' ');
-      if (!welcomeMessage) return message.channel.send('Vui lòng nhập nội dung chào!');
-      config.welcomeMessage = welcomeMessage;
-      await config.save();
-      message.channel.send('Đã cập nhật câu chào mới!');
-      break;
+  // Quản lý phản hồi
+  if (message.content.startsWith('eaaddreply')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    const [trigger, ...response] = message.content.split(' ').slice(1);
+    if (!trigger || !response.length) return message.reply('Cú pháp: eaaddreply <từ_khóa> <phản_hồi>');
+    if (!guildData) await Guild.create({ guildId: message.guild.id, replies: [{ trigger, response: response.join(' ') }] });
+    else guildData.replies.push({ trigger, response: response.join(' ') }), await guildData.save();
+    message.reply('Phản hồi mới đã được thêm.');
+  }
 
-    case 'eaaddreply':
-      const trigger = args[0];
-      const response = args.slice(1).join(' ');
-      if (!trigger || !response) return message.channel.send('Vui lòng nhập trigger và phản hồi!');
-      config.autoReplies.push({ trigger, response });
-      await config.save();
-      message.channel.send('Đã thêm phản hồi mới!');
-      break;
+  if (message.content.startsWith('edelreply')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    const trigger = message.content.split(' ')[1];
+    if (!trigger) return message.reply('Cú pháp: edelreply <từ_khóa>');
+    if (!guildData) return message.reply('Không tìm thấy từ khóa để xóa.');
+    guildData.replies = guildData.replies.filter(r => r.trigger !== trigger);
+    await guildData.save();
+    message.reply('Phản hồi đã được xóa.');
+  }
 
-    case 'edelreply':
-      const delTrigger = args[0];
-      if (!delTrigger) return message.channel.send('Vui lòng nhập trigger để xóa!');
-      config.autoReplies = config.autoReplies.filter(r => r.trigger !== delTrigger);
-      await config.save();
-      message.channel.send('Đã xóa phản hồi!');
-      break;
+  if (message.content.startsWith('elistreply')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return message.reply('Bạn không có quyền sử dụng lệnh này!');
+    if (!guildData || !guildData.replies.length) return message.reply('Chưa có phản hồi nào được thiết lập.');
+    message.reply(guildData.replies.map(r => `Từ khóa: ${r.trigger}, Phản hồi: ${r.response}`).join('\n'));
+  }
 
-    case 'elistreply':
-      if (config.autoReplies.length === 0) return message.channel.send('Không có phản hồi nào!');
-      const list = config.autoReplies.map(r => `Trigger: **${r.trigger}** → Response: **${r.response}**`).join('\n');
-      message.channel.send(`Danh sách phản hồi:\n${list}`);
-      break;
-
-    default:
-      const reply = config.autoReplies.find(r => message.content.includes(r.trigger));
-      if (reply) message.channel.send(reply.response);
-      break;
+  // Tự động phản hồi
+  if (guildData) {
+    const reply = guildData.replies.find(r => message.content.includes(r.trigger));
+    if (reply) message.reply(reply.response);
   }
 });
 
-// Đăng nhập bot
 client.login(process.env.DISCORD_TOKEN);
